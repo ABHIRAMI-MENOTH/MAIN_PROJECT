@@ -16,18 +16,24 @@ CORS(app)
 
 # ---------------- LOAD YOLO ----------------
 
-MODEL_PATH = "yolov8n.pt"   # SAME FOLDER as app.py
-model = YOLO(MODEL_PATH)
+object_model = YOLO("yolov8n.pt")
+currency_model = YOLO("best.pt")
 
 # ---------------- CAMERA -------------------
 
 cap = cv2.VideoCapture(0)
 
-latest_message = ""
-last_spoken_message = ""
-last_spoken_time = 0
+latest_object_message = ""
+latest_currency_message = ""
 
-SPEECH_DELAY = 3   # seconds between announcements
+last_object_spoken = ""
+last_object_time = 0
+
+last_currency_spoken = ""
+last_currency_time = 0
+
+OBJECT_SPEECH_DELAY = 3
+CURRENCY_SPEECH_DELAY = 6
 
 # ---------------- POSITION LOGIC -----------
 
@@ -41,48 +47,76 @@ def get_position(x_center, frame_width):
 
 # ---------------- VIDEO STREAM -------------
 
-def generate_frames():
-    global latest_message, last_spoken_message, last_spoken_time
+def generate_frames(model):
+
+    global latest_object_message, latest_currency_message
+    global last_object_spoken, last_object_time
+    global last_currency_spoken, last_currency_time
 
     while True:
+
         success, frame = cap.read()
 
         if not success:
             break
 
-        results = model(frame, stream=True)
-
+        results = model.predict(frame, stream=True)
         frame_width = frame.shape[1]
 
-        current_detection = ""
+        detected = False
 
         for r in results:
             for box in r.boxes:
 
+                detected = True
+
                 cls = int(box.cls[0])
                 label = model.names[cls]
+
+                # Format currency speech
+                if model == currency_model:
+                    label = label.replace("_", " ")
+                    label = label.replace("Rupee", " rupees")
+                    label = label.replace(" coin", "")
+                    label = label.replace(" note", "")
 
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
 
                 x_center = (x1 + x2) // 2
                 position = get_position(x_center, frame_width)
 
-                current_detection = f"{label} {position}"
-
-                # ---------------- SPEECH CONTROL ----------------
+                if model == currency_model:
+                    current_detection = label
+                else:
+                    current_detection = f"{label} {position}"
 
                 current_time = time.time()
 
-                if (
-                    current_detection != last_spoken_message and
-                    current_time - last_spoken_time > SPEECH_DELAY
-                ):
-                    latest_message = current_detection
-                    last_spoken_message = current_detection
-                    last_spoken_time = current_time
+                # OBJECT SPEECH
+                if model == object_model:
 
-                # ---------------- DRAW BOX ----------------------
+                    if (
+                        current_detection != last_object_spoken and
+                        current_time - last_object_time > OBJECT_SPEECH_DELAY
+                    ):
+                        latest_object_message = current_detection
+                        last_object_spoken = current_detection
+                        last_object_time = current_time
 
+                #CURRENCY SPEECH
+                else:
+                    if (
+                        current_detection != last_currency_spoken and
+                        current_time - last_currency_time > CURRENCY_SPEECH_DELAY
+                    ):
+                        latest_currency_message = current_detection
+                        last_currency_spoken = current_detection
+
+                    else:
+                        latest_currency_message = current_detection
+                    
+
+                # DRAW BOX
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
                 cv2.putText(
@@ -95,6 +129,16 @@ def generate_frames():
                     2
                 )
 
+        # -------- FIX FOR REPEATING AUDIO --------
+
+        if not detected:
+            if model == object_model:
+                latest_object_message = ""
+            else:
+                latest_currency_message = ""
+
+        # -----------------------------------------
+
         ret, buffer = cv2.imencode(".jpg", frame)
         frame = buffer.tobytes()
 
@@ -104,20 +148,35 @@ def generate_frames():
         )
 
 # ---------------- ROUTES -------------------
-
-@app.route("/video")
-def video():
+@app.route("/video/object")
+def video_object():
     return Response(
-        generate_frames(),
+        generate_frames(object_model),
         mimetype="multipart/x-mixed-replace; boundary=frame"
     )
 
-# Frontend polling endpoint
-@app.route("/detect")
-def detect():
-    return jsonify({"message": latest_message})
+@app.route("/video/currency")
+def video_currency():
+    return Response(
+        generate_frames(currency_model),
+        mimetype="multipart/x-mixed-replace; boundary=frame"
+    )
 
-# Serve React Build
+# ---------------- DETECT API ----------------
+
+@app.route("/detect/<mode>")
+def detect(mode):
+
+    if mode == "object":
+        return jsonify({"message": latest_object_message})
+
+    if mode == "currency":
+        return jsonify({"message": latest_currency_message})
+
+    return jsonify({"message": ""})
+
+# ---------------- FRONTEND ----------------
+
 @app.route("/")
 def serve_frontend():
     return send_from_directory(app.static_folder, "index.html")

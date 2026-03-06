@@ -1,42 +1,64 @@
-import { useEffect } from "react";
+import { useState } from "react";
 import Camera from "./camera";
-
-let lastSpoken = "";
+import "./App.css";
 
 function App() {
 
-  // 🔊 Unlock audio (REQUIRED)
-  const enableAudio = () => {
-    const u = new SpeechSynthesisUtterance("Audio enabled");
-    window.speechSynthesis.speak(u);
+  const [mode, setMode] = useState(null);
+
+  const speak = (text) => {
+    const speech = new SpeechSynthesisUtterance(text);
+    speech.rate = 1;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(speech);
   };
 
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch("http://127.0.0.1:5000/detect");
-        const data = await res.json();
+  if (!mode) {
+    return (
+      <div className="container">
 
-        if (data.message && data.message !== lastSpoken) {
-          const speech = new SpeechSynthesisUtterance(data.message);
-          speech.rate = 1;
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.speak(speech);
-          lastSpoken = data.message;
-        }
-      } catch (e) {
-        console.log("Waiting for backend...");
-      }
-    }, 1000);
+        <h1 className="title">Vision Assist</h1>
 
-    return () => clearInterval(interval);
-  }, []);
+        <div className="card-container">
+
+          <div
+            className="card"
+            onMouseEnter={() => speak("Object Detection")}
+            onClick={() => setMode("object")}
+          >
+            <h3>Object Detection</h3>
+          </div>
+
+          <div
+            className="card"
+            onMouseEnter={() => speak("Currency Detection")}
+            onClick={() => setMode("currency")}
+          >
+            <h3>Currency Detection</h3>
+          </div>
+
+        </div>
+
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <h2>Vision Assist</h2>
-      <button onClick={enableAudio}>Enable Audio</button>
-      <Camera />
+    <div className="container">
+
+      <button
+        onMouseEnter={() => speak("Back to Home")}
+        onClick={() => setMode(null)}
+      >
+        Back to Home
+      </button>
+
+      <h2>
+        {mode === "object" ? "Object Detection" : "Currency Detection"}
+      </h2>
+
+      <Camera mode={mode} />
+
     </div>
   );
 }
